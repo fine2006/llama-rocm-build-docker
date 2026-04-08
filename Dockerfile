@@ -2,7 +2,7 @@
 # llama.cpp ROCm Container - Optimized Build
 # =============================================================================
 # Build with:
-#   podman build --build-arg RELEASE_ID=20260310-12345678 \
+#   podman build --build-arg RELEASE_ID=20260408-24115666439 \
 #                --build-arg GFX_ARCH=gfx1152 \
 #                --build-arg ENABLE_ROCWMMA_FATTN=ON \
 #                --build-arg BUILD_WEBUI=ON \
@@ -17,7 +17,7 @@ FROM ubuntu:24.04 AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Build arguments
-ARG RELEASE_ID=20260310-12345678
+ARG RELEASE_ID=20260408-24115666439
 ARG GFX_ARCH=gfx1152
 ARG ENABLE_ROCWMMA_FATTN=ON
 ARG BUILD_WEBUI=ON

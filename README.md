@@ -39,9 +39,9 @@ This repository provides a containerized build of [`llama.cpp`](https://github.c
 
 ### Build Arguments
 
-| Argument | Default | Description |
+| Argument | Example | Description |
 |----------|---------|-------------|
-| `RELEASE_ID` | `20260310-12345678` | ROCm nightly release ID from [rocm.nightlies.amd.com/deb/](https://rocm.nightlies.amd.com/deb/) |
+| `RELEASE_ID` | `20260408-24115666439` | ROCm nightly release ID from [rocm.nightlies.amd.com/deb/](https://rocm.nightlies.amd.com/deb/) |
 | `GFX_ARCH` | `gfx1152` | GPU target architecture (e.g., `gfx1152`, `gfx1100`, `gfx942`) |
 | `ENABLE_ROCWMMA_FATTN` | `ON` | Enable rocWMMA for RDNA3+/CDNA FlashAttention |
 | `BUILD_WEBUI` | `ON` | Build WebUI executable (`llama-server-webui`) |
@@ -71,7 +71,7 @@ cd llama-rocm-build-docker
 
 ```bash
 podman build \
-  --build-arg RELEASE_ID=20260310-12345678 \
+  --build-arg RELEASE_ID=20260408-24115666439 \
   --build-arg GFX_ARCH=gfx1152 \
   --build-arg ENABLE_ROCWMMA_FATTN=ON \
   --build-arg BUILD_WEBUI=ON \
@@ -126,8 +126,8 @@ Common examples:
 
 ```bash
 podman build \
-  --build-arg RELEASE_ID=YOUR_RELEASE_ID \
-  --build-arg GFX_ARCH=YOUR_GPU_ARCH \
+  --build-arg RELEASE_ID=20260408-24115666439 \
+  --build-arg GFX_ARCH=gfx1152 \
   --build-arg ENABLE_ROCWMMA_FATTN=ON \
   -t llama-cpp-rocm:latest .
 ```

@@ -57,7 +57,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            RELEASE_ID=20260310-12345678
+            RELEASE_ID=20260408-24115666439
             GFX_ARCH=gfx1152
             ENABLE_ROCWMMA_FATTN=ON
             BUILD_WEBUI=ON
