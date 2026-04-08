@@ -44,8 +44,8 @@ This repository provides a containerized build of [`llama.cpp`](https://github.c
 | `RELEASE_ID` | `20260408-24115666439` | ROCm nightly release ID from [rocm.nightlies.amd.com/deb/](https://rocm.nightlies.amd.com/deb/) |
 | `GFX_ARCH` | `gfx1152` | GPU target architecture (e.g., `gfx1152`, `gfx1100`, `gfx942`) |
 | `ENABLE_ROCWMMA_FATTN` | `ON` | Enable rocWMMA for RDNA3+/CDNA FlashAttention |
-| `BUILD_WEBUI` | `ON` | Build WebUI executable (`llama-server-webui`) |
-| `BUILD_LLAMA_SERVER` | `ON` | Build llama-server binary |
+| `BUILD_WEBUI` | `ON` | Build embedded Web UI for llama-server |
+| `BUILD_ALL_TOOLS` | `ON` | Build all llama.cpp tools (OFF = llama-server only) |
 
 ### Build Options
 
@@ -55,6 +55,12 @@ The following options are **hardcoded** to optimize the build:
 - ✅ **Static libraries** (`BUILD_SHARED_LIBS=OFF`) for self-contained deployment
 - ✅ **CPU variants disabled** (`GGML_CPU_ALL_VARIANTS=OFF`)
 - ✅ **Tests, tools, examples disabled** for smaller binary
+
+**Note:** The `BUILD_ALL_TOOLS` option controls whether all llama.cpp tools are built:
+- `ON` (default): Builds `llama-server`, `llama-quantize`, `llama-bench`, `llama-perplexity`, and conversion tools
+- `OFF`: Builds only `llama-server` (reduces build time and binary size)
+
+The `BUILD_WEBUI` option controls whether the embedded Web UI is compiled into `llama-server`. This is useful if you want to access the server via a web browser. Set it to `OFF` if you only need CLI functionality to reduce binary size.
 
 ---
 
@@ -71,11 +77,10 @@ cd llama-rocm-build-docker
 
 ```bash
 podman build \
-  --build-arg RELEASE_ID=20260408-24115666439 \
-  --build-arg GFX_ARCH=gfx1152 \
+  --build-arg RELEASE_ID=YOUR_RELEASE_ID \
+  --build-arg GFX_ARCH=YOUR_GPU_ARCH \
   --build-arg ENABLE_ROCWMMA_FATTN=ON \
-  --build-arg BUILD_WEBUI=ON \
-  --build-arg BUILD_LLAMA_SERVER=ON \
+  --build-arg BUILD_ALL_TOOLS=ON \
   -t llama-cpp-rocm:latest .
 ```
 
@@ -129,6 +134,7 @@ podman build \
   --build-arg RELEASE_ID=20260408-24115666439 \
   --build-arg GFX_ARCH=gfx1152 \
   --build-arg ENABLE_ROCWMMA_FATTN=ON \
+  --build-arg BUILD_ALL_TOOLS=ON \
   -t llama-cpp-rocm:latest .
 ```
 
@@ -136,7 +142,7 @@ podman build \
 
 ## Available Commands
 
-The container includes the following binaries:
+The container includes the following binaries (when `BUILD_ALL_TOOLS=ON`):
 
 | Binary | Description |
 |--------|-------------|
@@ -147,6 +153,8 @@ The container includes the following binaries:
 | `llama-convert-pth` | Convert PyTorch models to GGUF |
 | `llama-convert-hf-to-gguf` | Convert HuggingFace models to GGUF |
 | `llama-convert-lora-to-gguf` | Convert LoRA adapters to GGUF |
+
+**Note:** If you built with `BUILD_ALL_TOOLS=OFF`, only `llama-server` will be available.
 
 ### Usage Examples
 

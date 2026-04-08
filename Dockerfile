@@ -21,7 +21,7 @@ ARG RELEASE_ID=20260408-24115666439
 ARG GFX_ARCH=gfx1152
 ARG ENABLE_ROCWMMA_FATTN=ON
 ARG BUILD_WEBUI=ON
-ARG BUILD_LLAMA_SERVER=ON
+ARG BUILD_ALL_TOOLS=ON
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,7 +31,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     gcc \
     g++ \
-    make \
     python3 \
     python3-pip \
     python3-dev \
@@ -86,24 +85,28 @@ RUN HIPCXX="$(hipconfig -l)/clang" \
         -DLLAMA_BUILD_TESTS=OFF \
         -DLLAMA_BUILD_TOOLS=OFF \
         -DLLAMA_BUILD_EXAMPLES=OFF \
-        -DLLAMA_BUILD_SERVER="${BUILD_LLAMA_SERVER}" \
+        -DLLAMA_BUILD_SERVER="ON" \
         -DLLAMA_BUILD_WEBUI="${BUILD_WEBUI}" \
-    && cmake --build llama.cpp/build --config Release -j$(nproc)
+    && if [ "${BUILD_ALL_TOOLS}" = "ON" ]; then \
+            cmake --build llama.cpp/build --target llama-server llama-quantize llama-bench llama-perplexity llama-convert-pth llama-convert-hf-to-gguf llama-convert-lora-to-gguf -j$(nproc); \
+        else \
+            cmake --build llama.cpp/build --target llama-server -j$(nproc); \
+        fi
 
 # Copy built binaries
-RUN if [ "${BUILD_LLAMA_SERVER}" = "ON" ]; then \
-        cp llama.cpp/build/bin/llama-server /usr/local/bin/; \
-    fi && \
-    if [ "${BUILD_WEBUI}" = "ON" ]; then \
-        cp llama.cpp/build/bin/llama-server-webui /usr/local/bin/ 2>/dev/null || true; \
-    fi && \
-    cp llama.cpp/build/bin/llama-quantize /usr/local/bin/ && \
-    cp llama.cpp/build/bin/llama-bench /usr/local/bin/ && \
-    cp llama.cpp/build/bin/llama-perplexity /usr/local/bin/ && \
-    cp llama.cpp/build/bin/llama-convert-pth /usr/local/bin/ && \
-    cp llama.cpp/build/bin/llama-convert-hf-to-gguf /usr/local/bin/ && \
-    cp llama.cpp/build/bin/llama-convert-lora-to-gguf /usr/local/bin/ && \
-    chmod +x /usr/local/bin/llama-*
+RUN if [ "${BUILD_ALL_TOOLS}" = "ON" ]; then \
+        cp llama.cpp/build/bin/llama-server /usr/local/bin/ && \
+        cp llama.cpp/build/bin/llama-quantize /usr/local/bin/ && \
+        cp llama.cpp/build/bin/llama-bench /usr/local/bin/ && \
+        cp llama.cpp/build/bin/llama-perplexity /usr/local/bin/ && \
+        cp llama.cpp/build/bin/llama-convert-pth /usr/local/bin/ && \
+        cp llama.cpp/build/bin/llama-convert-hf-to-gguf /usr/local/bin/ && \
+        cp llama.cpp/build/bin/llama-convert-lora-to-gguf /usr/local/bin/ && \
+        chmod +x /usr/local/bin/llama-*; \
+    else \
+        cp llama.cpp/build/bin/llama-server /usr/local/bin/ && \
+        chmod +x /usr/local/bin/llama-server; \
+    fi
 
 # Clean up build artifacts
 RUN rm -rf /build/llama.cpp/build

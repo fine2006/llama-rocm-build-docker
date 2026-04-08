@@ -12,9 +12,6 @@ ENABLE_ROCWMMA_FATTN ?= ON
 # Build llama-server only (ON/OFF)
 BUILD_LLAMA_SERVER ?= ON
 
-# Build WebUI (ON/OFF)
-BUILD_WEBUI ?= ON
-
 .PHONY: all clean
 
 all: $(BUILD_DIR)/bin/llama-server
@@ -49,8 +46,7 @@ $(BUILD_DIR)/bin/llama-server:
 		-DLLAMA_BUILD_TESTS=OFF \
 		-DLLAMA_BUILD_TOOLS=OFF \
 		-DLLAMA_BUILD_EXAMPLES=OFF \
-		-DLLAMA_BUILD_SERVER=$(BUILD_LLAMA_SERVER) \
-		-DLLAMA_BUILD_WEBUI=$(BUILD_WEBUI)
+		-DLLAMA_BUILD_SERVER=$(BUILD_LLAMA_SERVER)
 	cmake --build $(BUILD_DIR) --config Release -- -j$(nproc)
 
 clean:
