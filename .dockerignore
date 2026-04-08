@@ -1,0 +1,26 @@
+# Build artifacts
+llama.cpp/build*
+llama.cpp/.git
+llama.cpp/.github
+*.o
+*.a
+.cache/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+*.tar
+*.deb
+
+# Models and large files
+models/
+*.gguf
+*.bin
+*.safetensors
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
