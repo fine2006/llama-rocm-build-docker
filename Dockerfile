@@ -54,7 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Set ROCm environment variables
-ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:\$PATH \
+ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH \
     HIP_PATH=/opt/rocm \
     ROCM_PATH=/opt/rocm
 
@@ -64,12 +64,12 @@ WORKDIR /build
 COPY . .
 
 # Build llama.cpp with optimized CMake configuration
-RUN HIPCXX="\$(hipconfig -l)/clang" \
-    HIP_PATH="\$(hipconfig -R)" \
+RUN HIPCXX="$(hipconfig -l)/clang" \
+    HIP_PATH="$(hipconfig -R)" \
     cmake -S llama.cpp -B llama.cpp/build \
         -DGGML_HIP=ON \
-        -DGGML_HIP_ROCWMMA_FATTN=\${ENABLE_ROCWMMA_FATTN} \
-        -DGPU_TARGETS=\${GFX_ARCH} \
+        -DGGML_HIP_ROCWMMA_FATTN="${ENABLE_ROCWMMA_FATTN}" \
+        -DGPU_TARGETS="${GFX_ARCH}" \
         -DGGML_CUDA=OFF \
         -DGGML_VULKAN=OFF \
         -DGGML_METAL=OFF \
@@ -86,15 +86,15 @@ RUN HIPCXX="\$(hipconfig -l)/clang" \
         -DLLAMA_BUILD_TESTS=OFF \
         -DLLAMA_BUILD_TOOLS=OFF \
         -DLLAMA_BUILD_EXAMPLES=OFF \
-        -DLLAMA_BUILD_SERVER=\${BUILD_LLAMA_SERVER} \
-        -DLLAMA_BUILD_WEBUI=\${BUILD_WEBUI} \
-    && cmake --build llama.cpp/build --config Release -j\$(nproc)
+        -DLLAMA_BUILD_SERVER="${BUILD_LLAMA_SERVER}" \
+        -DLLAMA_BUILD_WEBUI="${BUILD_WEBUI}" \
+    && cmake --build llama.cpp/build --config Release -j$(nproc)
 
 # Copy built binaries
-RUN if [ "\${BUILD_LLAMA_SERVER}" = "ON" ]; then \
+RUN if [ "${BUILD_LLAMA_SERVER}" = "ON" ]; then \
         cp llama.cpp/build/bin/llama-server /usr/local/bin/; \
     fi && \
-    if [ "\${BUILD_WEBUI}" = "ON" ]; then \
+    if [ "${BUILD_WEBUI}" = "ON" ]; then \
         cp llama.cpp/build/bin/llama-server-webui /usr/local/bin/ 2>/dev/null || true; \
     fi && \
     cp llama.cpp/build/bin/llama-quantize /usr/local/bin/ && \
@@ -124,10 +124,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Set ROCm environment
-ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:\$PATH \
+ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH \
     HIP_PATH=/opt/rocm \
     ROCM_PATH=/opt/rocm \
-    LD_LIBRARY_PATH=/opt/rocm/lib:\$LD_LIBRARY_PATH
+    LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
 
 # Copy binaries from builder stage
 COPY --from=builder /usr/local/bin/llama-server /usr/local/bin/
