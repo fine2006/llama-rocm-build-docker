@@ -68,8 +68,9 @@ RUN echo "=== hipconfig output ===" \
     # package likely only installed runtime libs, not the full build toolchain.
     && hipconfig --full \
     && echo "=== LLVM/clang compiler ===" \
-    && ls -la /opt/rocm/llvm/bin/clang \
-    && /opt/rocm/llvm/bin/clang --version \
+    # nightly builds put clang at /opt/rocm/lib/llvm/bin/; stable at /opt/rocm/llvm/bin/
+    && find /opt/rocm -name 'clang' -path '*/llvm/bin/clang' 2>/dev/null \
+    && (clang --version || /opt/rocm/lib/llvm/bin/clang --version) \
     && echo "=== HIP CMake integration ===" \
     # CMake's FindHIP needs these .cmake files; their absence means GGML_HIP=ON fails.
     && find /opt/rocm/lib/cmake /opt/rocm/share \
@@ -92,27 +93,34 @@ RUN test -f llama.cpp/CMakeLists.txt \
          exit 1; }
 
 # ── Resolve the HIP clang path robustly ──────────────────────────────────────
-# hipconfig -l returns the HIP *library* dir (e.g. /opt/rocm/lib), NOT the
-# compiler. The correct flag varies by ROCm version:
-#   ROCm >= 5.x  → hipconfig --hipclangpath  (returns /opt/rocm/llvm/bin)
-#   Fallback     → hardcoded /opt/rocm/llvm/bin/clang
-# We probe both and abort early with a useful message if neither works.
+# hipconfig --hipclangpath returns the directory containing clang, e.g.:
+#   /opt/rocm/lib/llvm/bin   (ROCm nightly, observed)
+#   /opt/rocm/llvm/bin       (some stable releases)
+# We probe hipconfig first, then try both known hardcoded locations.
 RUN HIPCXX="$(hipconfig --hipclangpath 2>/dev/null)/clang" \
+    && if [ ! -x "${HIPCXX}" ]; then HIPCXX=/opt/rocm/lib/llvm/bin/clang; fi \
+    && if [ ! -x "${HIPCXX}" ]; then HIPCXX=/opt/rocm/llvm/bin/clang;     fi \
     && if [ ! -x "${HIPCXX}" ]; then \
-         HIPCXX=/opt/rocm/llvm/bin/clang; \
-       fi \
-    && if [ ! -x "${HIPCXX}" ]; then \
-         echo "ERROR: cannot locate HIP clang — tried hipconfig --hipclangpath and /opt/rocm/llvm/bin/clang"; \
+         echo "ERROR: cannot locate HIP clang — searched:"; \
+         echo "  hipconfig --hipclangpath -> $(hipconfig --hipclangpath 2>/dev/null)"; \
+         echo "  /opt/rocm/lib/llvm/bin/clang"; \
+         echo "  /opt/rocm/llvm/bin/clang"; \
          exit 1; \
        fi \
     && echo "Resolved HIPCXX=${HIPCXX}"
 
 # Configure and build — CPU variants explicitly disabled; HIP only
+# Both CMAKE_C_COMPILER and CMAKE_CXX_COMPILER must point to ROCm clang.
+# If only CXX is set, CMake falls back to system gcc for .c files — gcc does
+# not know -Wunreachable-code-break/-return (clang-only flags) and every C
+# translation unit fails immediately.
 RUN HIPCXX="$(hipconfig --hipclangpath 2>/dev/null)/clang" \
-    && { [ -x "${HIPCXX}" ] || HIPCXX=/opt/rocm/llvm/bin/clang; } \
+    && if [ ! -x "${HIPCXX}" ]; then HIPCXX=/opt/rocm/lib/llvm/bin/clang; fi \
+    && if [ ! -x "${HIPCXX}" ]; then HIPCXX=/opt/rocm/llvm/bin/clang;     fi \
     && HIP_PATH="$(hipconfig -R)" \
     cmake -S llama.cpp -B llama.cpp/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER="${HIPCXX}" \
       -DCMAKE_CXX_COMPILER="${HIPCXX}" \
       -DHIP_CXX_COMPILER="${HIPCXX}" \
       -DGGML_CPU_ALL_VARIANTS=OFF \
@@ -227,7 +235,7 @@ RUN apk add --no-cache \
 
 # ── ROCm runtime libraries ────────────────────────────────────────────────────
 COPY --from=builder /staging/rocm-lib/ /opt/rocm/lib/
-ENV LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH:-}
+ENV LD_LIBRARY_PATH=/opt/rocm/lib
 
 # ── llama.cpp binaries ────────────────────────────────────────────────────────
 COPY --from=builder /staging/bin/ /usr/local/bin/
@@ -236,7 +244,7 @@ COPY --from=builder /staging/bin/ /usr/local/bin/
 COPY --from=builder /staging/rocm-smi/bin/   /opt/rocm/bin/
 COPY --from=builder /staging/rocm-smi/module/ /opt/rocm/libexec/rocm_smi/
 # Make rocm-smi importable by the bundled script
-ENV PYTHONPATH=/opt/rocm/libexec:${PYTHONPATH:-}
+ENV PYTHONPATH=/opt/rocm/libexec
 RUN ln -sf /opt/rocm/bin/rocm-smi /usr/local/bin/rocm-smi 2>/dev/null || true
 
 # ── amdgpu_top + radeontop ────────────────────────────────────────────────────
