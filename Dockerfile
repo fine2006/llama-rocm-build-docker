@@ -87,26 +87,17 @@ RUN HIPCXX="$(hipconfig -l)/clang" \
         -DLLAMA_BUILD_EXAMPLES=OFF \
         -DLLAMA_BUILD_SERVER="ON" \
         -DLLAMA_BUILD_WEBUI="${BUILD_WEBUI}" \
-    && if [ "${BUILD_ALL_TOOLS}" = "ON" ]; then \
-            cmake --build llama.cpp/build --target llama-server llama-quantize llama-bench llama-perplexity llama-convert-pth llama-convert-hf-to-gguf llama-convert-lora-to-gguf -j$(nproc); \
-        else \
-            cmake --build llama.cpp/build --target llama-server -j$(nproc); \
-        fi
+    && cmake --build llama.cpp/build -j$(nproc)
 
 # Copy built binaries
-RUN if [ "${BUILD_ALL_TOOLS}" = "ON" ]; then \
-        cp llama.cpp/build/bin/llama-server /usr/local/bin/ && \
-        cp llama.cpp/build/bin/llama-quantize /usr/local/bin/ && \
-        cp llama.cpp/build/bin/llama-bench /usr/local/bin/ && \
-        cp llama.cpp/build/bin/llama-perplexity /usr/local/bin/ && \
-        cp llama.cpp/build/bin/llama-convert-pth /usr/local/bin/ && \
-        cp llama.cpp/build/bin/llama-convert-hf-to-gguf /usr/local/bin/ && \
-        cp llama.cpp/build/bin/llama-convert-lora-to-gguf /usr/local/bin/ && \
-        chmod +x /usr/local/bin/llama-*; \
-    else \
-        cp llama.cpp/build/bin/llama-server /usr/local/bin/ && \
-        chmod +x /usr/local/bin/llama-server; \
-    fi
+RUN cp llama.cpp/build/bin/llama-server /usr/local/bin/ && \
+    cp llama.cpp/build/bin/llama-quantize /usr/local/bin/ && \
+    cp llama.cpp/build/bin/llama-bench /usr/local/bin/ && \
+    cp llama.cpp/build/bin/llama-perplexity /usr/local/bin/ && \
+    cp llama.cpp/build/bin/llama-convert-pth /usr/local/bin/ && \
+    cp llama.cpp/build/bin/llama-convert-hf-to-gguf /usr/local/bin/ && \
+    cp llama.cpp/build/bin/llama-convert-lora-to-gguf /usr/local/bin/ && \
+    chmod +x /usr/local/bin/llama-*
 
 # Clean up build artifacts
 RUN rm -rf /build/llama.cpp/build

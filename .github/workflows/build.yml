@@ -61,6 +61,5 @@ jobs:
             GFX_ARCH=gfx1152
             ENABLE_ROCWMMA_FATTN=ON
             BUILD_WEBUI=ON
-            BUILD_ALL_TOOLS=ON
           cache-from: type=gha
           cache-to: type=gha,mode=max

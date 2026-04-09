@@ -3,7 +3,7 @@
 This repository provides a containerized build of [`llama.cpp`](https://github.com/ggml-org/llama.cpp) with HIP/ROCm support for AMD GPUs. The build process:
 
 - Uses **Ubuntu 24.04** base image with **ROCm nightly SDK** for a specific GPU architecture.
-- Relies on a **Git submodule** for `llama.cpp` and a **Makefile** for build configuration.
+- Relies on a **Git submodule** for `llama.cpp`.
 - Produces a container image that runs `llama-server` with all ROCm devices available.
 - Includes **multi-stage Docker build** for optimized image size (~6-7GB).
 
@@ -19,7 +19,6 @@ This repository provides a containerized build of [`llama.cpp`](https://github.c
 ├── .dockerignore              # Files to exclude from build context
 ├── .gitmodules                # Defines llama.cpp submodule
 ├── Dockerfile                 # Container build instructions (multi-stage)
-├── Makefile                   # Builds llama.cpp with ROCm
 ├── llama.cpp/                 # Git submodule (ggml-org/llama.cpp)
 └── README.md                  # This file
 ```
@@ -45,7 +44,6 @@ This repository provides a containerized build of [`llama.cpp`](https://github.c
 | `GFX_ARCH` | `gfx1152` | GPU target architecture (e.g., `gfx1152`, `gfx1100`, `gfx942`) |
 | `ENABLE_ROCWMMA_FATTN` | `ON` | Enable rocWMMA for RDNA3+/CDNA FlashAttention |
 | `BUILD_WEBUI` | `ON` | Build embedded Web UI for llama-server |
-| `BUILD_ALL_TOOLS` | `ON` | Build all llama.cpp tools (OFF = llama-server only) |
 
 ### Build Options
 
@@ -56,11 +54,7 @@ The following options are **hardcoded** to optimize the build:
 - ✅ **CPU variants disabled** (`GGML_CPU_ALL_VARIANTS=OFF`)
 - ✅ **Tests, tools, examples disabled** for smaller binary
 
-**Note:** The `BUILD_ALL_TOOLS` option controls whether all llama.cpp tools are built:
-- `ON` (default): Builds `llama-server`, `llama-quantize`, `llama-bench`, `llama-perplexity`, and conversion tools
-- `OFF`: Builds only `llama-server` (reduces build time and binary size)
-
-The `BUILD_WEBUI` option controls whether the embedded Web UI is compiled into `llama-server`. This is useful if you want to access the server via a web browser. Set it to `OFF` if you only need CLI functionality to reduce binary size.
+**Note:** The `BUILD_WEBUI` option controls whether the embedded Web UI is compiled into `llama-server`. This is useful if you want to access the server via a web browser. Set it to `OFF` if you only need CLI functionality to reduce binary size.
 
 ---
 
@@ -80,7 +74,6 @@ podman build \
   --build-arg RELEASE_ID=YOUR_RELEASE_ID \
   --build-arg GFX_ARCH=YOUR_GPU_ARCH \
   --build-arg ENABLE_ROCWMMA_FATTN=ON \
-  --build-arg BUILD_ALL_TOOLS=ON \
   -t llama-cpp-rocm:latest .
 ```
 
@@ -153,8 +146,6 @@ The container includes the following binaries (when `BUILD_ALL_TOOLS=ON`):
 | `llama-convert-pth` | Convert PyTorch models to GGUF |
 | `llama-convert-hf-to-gguf` | Convert HuggingFace models to GGUF |
 | `llama-convert-lora-to-gguf` | Convert LoRA adapters to GGUF |
-
-**Note:** If you built with `BUILD_ALL_TOOLS=OFF`, only `llama-server` will be available.
 
 ### Usage Examples
 
