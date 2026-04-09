@@ -24,16 +24,16 @@ env:
   IMAGE_NAME: llama-cpp-rocm
   REGISTRY: ghcr.io
 
-# Cancel any in-progress run for the same branch/PR to avoid wasted runner time.
-# Matrix suffix keeps server and full builds from cancelling each other.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.suffix }}
-  cancel-in-progress: true
-
 jobs:
   build-and-push:
     runs-on: ubuntu-24.04
     timeout-minutes: 240   # ROCm/HIP compilation is slow; 4 h is a safe ceiling
+
+    # Cancel stale runs of the same variant. Matrix suffix is in scope here
+    # (job level), unlike the workflow-level concurrency block where it isn't.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.suffix }}
+      cancel-in-progress: true
 
     permissions:
       contents: read
