@@ -1,139 +1,221 @@
 # =============================================================================
-# llama.cpp ROCm Container - Optimized Build
-# =============================================================================
-# Build with:
-#   podman build --build-arg RELEASE_ID=20260408-24115666439 \
-#                --build-arg GFX_ARCH=gfx1152 \
-#                --build-arg ENABLE_ROCWMMA_FATTN=ON \
-#                --build-arg BUILD_WEBUI=ON \
-#                --build-arg BUILD_LLAMA_SERVER=ON \
-#                -t llama-cpp-rocm:latest .
+# llama.cpp — ROCm-only build, Wolfi runtime, self-contained
+#
+# Build args:
+#   RELEASE_ID            ROCm nightly build ID (default: 20260408-24115666439)
+#   GFX_ARCH              GPU target, e.g. gfx1152, gfx1100, gfx906
+#   ENABLE_ROCWMMA_FATTN  rocWMMA flash attention (ON | OFF)
+#   BUILD_ALL             OFF = llama-server only
+#                         ON  = + llama-{quantize,bench,perplexity}
+#                         NOTE: llama-convert-* are Python scripts in modern
+#                               llama.cpp builds — add them separately if needed
+#   AMDGPU_TOP_VERSION    amdgpu_top release to embed (static musl binary)
+#
+# Examples:
+#   # Minimal — server only
+#   podman build \
+#     --build-arg GFX_ARCH=gfx1152 \
+#     -t llama-rocm:server .
+#
+#   # Full toolkit
+#   podman build \
+#     --build-arg GFX_ARCH=gfx1152 \
+#     --build-arg BUILD_ALL=ON \
+#     -t llama-rocm:full .
 # =============================================================================
 
-# Stage 1: Build (Ubuntu + ROCm nightly)
+
+# ─── Stage 1: llama.cpp builder (Ubuntu 24.04 + ROCm nightly) ────────────────
 FROM ubuntu:24.04 AS builder
 
-# Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Build arguments
 ARG RELEASE_ID=20260408-24115666439
 ARG GFX_ARCH=gfx1152
 ARG ENABLE_ROCWMMA_FATTN=ON
-ARG BUILD_WEBUI=ON
-ARG BUILD_ALL_TOOLS=ON
+ARG BUILD_ALL=OFF
 
-# Install build dependencies
+# Build toolchain — keep minimal, no doc/dev extras
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    build-essential \
-    cmake \
-    gcc \
-    g++ \
-    python3 \
-    python3-pip \
-    python3-dev \
-    libssl-dev \
-    git \
-    && apt-get purge -y --auto-remove \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+      ca-certificates \
+      curl \
+      build-essential \
+      cmake \
+      ninja-build \
+      python3 \
+      python3-pip \
+      libssl-dev \
+      git \
+    && rm -rf /var/lib/apt/lists/*
 
-# Add ROCm nightly repository
-RUN tee /etc/apt/sources.list.d/rocm-nightly.list <<EOF
-deb [trusted=yes] https://rocm.nightlies.amd.com/deb/${RELEASE_ID} stable main
-EOF
+# ROCm nightly apt repo — pinned to the exact build ID
+# trusted=yes is intentional here: nightly builds don't ship signed Release files
+RUN echo "deb [trusted=yes] https://rocm.nightlies.amd.com/deb/${RELEASE_ID} stable main" \
+    > /etc/apt/sources.list.d/rocm-nightly.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+         amdrocm-core-sdk-${GFX_ARCH} \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install ROCm SDK for target GPU architecture
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    amdrocm-core-sdk-${GFX_ARCH} \
-    && apt-get purge -y --auto-remove \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
-
-# Set ROCm environment variables
 ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH \
     HIP_PATH=/opt/rocm \
     ROCM_PATH=/opt/rocm
 
 WORKDIR /build
-
-# Copy project files (excluding git data)
 COPY . .
 
-# Build llama.cpp with optimized CMake configuration
-RUN cmake -S llama.cpp -B llama.cpp/build \
-        -DCMAKE_CXX_COMPILER="/opt/rocm/llvm/bin/clang" \
-        -DGGML_CUDA=OFF \
-        -DGGML_VULKAN=OFF \
-        -DGGML_METAL=OFF \
-        -DGGML_OPENCL=OFF \
-        -DGGML_MUSA=OFF \
-        -DGGML_CANN=OFF \
-        -DGGML_ZENDNN=OFF \
-        -DGGML_OPENVINO=OFF \
-        -DGGML_WEBGPU=OFF \
-        -DGGML_BACKEND_DL=OFF \
-        -DGGML_CPU_ALL_VARIANTS=OFF \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DLLAMA_BUILD_TESTS=OFF \
-        -DLLAMA_BUILD_TOOLS=OFF \
-        -DLLAMA_BUILD_EXAMPLES=OFF \
-        -DGGML_HIP=ON \
-        -DGGML_HIP_ROCWMMA_FATTN="${ENABLE_ROCWMMA_FATTN}" \
-        -DGPU_TARGETS="${GFX_ARCH}" \
-        -DLLAMA_BUILD_SERVER="ON" \
-        -DLLAMA_BUILD_WEBUI="${BUILD_WEBUI}" \
-    && cmake --build llama.cpp/build -j$(nproc) --verbose
+# Configure and build — CPU variants explicitly disabled; HIP only
+RUN HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" \
+    cmake -S llama.cpp -B llama.cpp/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang \
+      -DGGML_CPU_ALL_VARIANTS=OFF \
+      -DGGML_NATIVE=OFF \
+      -DGGML_CUDA=OFF \
+      -DGGML_METAL=OFF \
+      -DGGML_VULKAN=OFF \
+      -DGGML_HIP=ON \
+      -DGGML_HIP_ROCWMMA_FATTN="${ENABLE_ROCWMMA_FATTN}" \
+      -DGPU_TARGETS="${GFX_ARCH}" \
+    && cmake --build llama.cpp/build -j$(nproc)
 
-# Copy built binaries
-RUN cp llama.cpp/build/bin/llama-server /usr/local/bin/ && \
-    cp llama.cpp/build/bin/llama-quantize /usr/local/bin/ && \
-    cp llama.cpp/build/bin/llama-bench /usr/local/bin/ && \
-    cp llama.cpp/build/bin/llama-perplexity /usr/local/bin/ && \
-    cp llama.cpp/build/bin/llama-convert-pth /usr/local/bin/ && \
-    cp llama.cpp/build/bin/llama-convert-hf-to-gguf /usr/local/bin/ && \
-    cp llama.cpp/build/bin/llama-convert-lora-to-gguf /usr/local/bin/ && \
-    chmod +x /usr/local/bin/llama-*
+# Stage binaries: llama-server always; rest behind BUILD_ALL
+RUN mkdir -p /staging/bin \
+    && install -Dm755 llama.cpp/build/bin/llama-server /staging/bin/ \
+    && if [ "${BUILD_ALL}" = "ON" ]; then \
+         for bin in llama-quantize llama-bench llama-perplexity; do \
+           if [ -f "llama.cpp/build/bin/${bin}" ]; then \
+             install -Dm755 "llama.cpp/build/bin/${bin}" /staging/bin/; \
+             echo "Staged: ${bin}"; \
+           else \
+             echo "WARN: ${bin} not found — skipping"; \
+           fi; \
+         done; \
+       fi
 
-# Clean up build artifacts
-RUN rm -rf /build/llama.cpp/build
+# ── Collect ROCm runtime libraries ──────────────────────────────────────────
+# Strategy: copy the entire /opt/rocm/lib tree (preserving symlinks and
+# subdirectory layout), then strip files that are only needed at build time:
+#   - *.a     static archives (~60% of space)
+#   - cmake/  CMake integration files
+#   - pkgconfig/ pkg-config metadata
+# This is more reliable than ldd-chasing because ROCm libs dlopen() other
+# libs at runtime (e.g. device-specific kernels) that don't appear in ldd.
+RUN cp -a /opt/rocm/lib /staging/rocm-lib \
+    && find /staging/rocm-lib \
+         \( -name '*.a' \
+         -o -path '*/cmake/*' \
+         -o -path '*/pkgconfig/*' \
+         \) -delete
 
-# Stage 2: Runtime (minimal Ubuntu + ROCm runtime)
-FROM ubuntu:24.04 AS runtime
+# ── Collect rocm-smi (Python script + its Python bindings module) ────────────
+# The script lives in /opt/rocm/bin; its Python module is version-dependent:
+#   ROCm ≥ 5.7  → /opt/rocm/libexec/rocm_smi/
+#   ROCm < 5.7  → /opt/rocm/share/rocm_smi/  or  /opt/rocm/lib/python*/
+RUN mkdir -p /staging/rocm-smi/bin /staging/rocm-smi/module \
+    && cp /opt/rocm/bin/rocm-smi /staging/rocm-smi/bin/ 2>/dev/null \
+       || echo "WARN: rocm-smi binary not found" \
+    && for dir in \
+         /opt/rocm/libexec/rocm_smi \
+         /opt/rocm/share/rocm_smi \
+         $(find /opt/rocm/lib -maxdepth 3 -type d -name 'rocm_smi' 2>/dev/null | head -1); \
+       do \
+         if [ -d "$dir" ]; then \
+           cp -r "$dir/." /staging/rocm-smi/module/; \
+           echo "Staged rocm-smi module from: $dir"; \
+           break; \
+         fi; \
+       done
 
-# Prevent interactive prompts
+
+# ─── Stage 2: GPU monitoring tools ───────────────────────────────────────────
+FROM ubuntu:24.04 AS monitoring
+
+ARG AMDGPU_TOP_VERSION=0.10.3
+
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install ROCm runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    libgomp1 \
-    curl \
-    && apt-get purge -y --auto-remove \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+      ca-certificates \
+      curl \
+      radeontop \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set ROCm environment
-ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH \
-    HIP_PATH=/opt/rocm \
-    ROCM_PATH=/opt/rocm \
-    LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
+# amdgpu_top: statically linked musl binary — works on Wolfi without extra libs.
+# Falls back gracefully; radeontop is always available via apt above.
+RUN mkdir -p /staging/bin \
+    && TARBALL="amdgpu_top-v${AMDGPU_TOP_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+    && URL="https://github.com/Umio-Yasuno/amdgpu_top/releases/download/v${AMDGPU_TOP_VERSION}/${TARBALL}" \
+    && echo "Fetching amdgpu_top ${AMDGPU_TOP_VERSION} ..." \
+    && if curl -fsSL --retry 3 --retry-delay 2 -o /tmp/at.tar.gz "${URL}"; then \
+         tar -xzf /tmp/at.tar.gz -C /tmp/ \
+         && find /tmp -name 'amdgpu_top' -type f -not -path '*/\.*' | head -1 \
+              | xargs -I{} install -Dm755 {} /staging/bin/amdgpu_top \
+         && echo "amdgpu_top installed"; \
+       else \
+         echo "WARN: amdgpu_top download failed — radeontop will be used as fallback"; \
+       fi
 
-# Copy binaries from builder stage
-COPY --from=builder /usr/local/bin/llama-server /usr/local/bin/
-COPY --from=builder /usr/local/bin/llama-quantize /usr/local/bin/
-COPY --from=builder /usr/local/bin/llama-bench /usr/local/bin/
-COPY --from=builder /usr/local/bin/llama-perplexity /usr/local/bin/
-COPY --from=builder /usr/local/bin/llama-convert-pth /usr/local/bin/
-COPY --from=builder /usr/local/bin/llama-convert-hf-to-gguf /usr/local/bin/
-COPY --from=builder /usr/local/bin/llama-convert-lora-to-gguf /usr/local/bin/
+# Bundle radeontop: copy binary and the non-glibc shared libs it needs
+# (libpciaccess, libxcb-dri2, libdrm) so they work on Wolfi's glibc
+RUN install -Dm755 /usr/bin/radeontop /staging/bin/radeontop \
+    && mkdir -p /staging/radeontop-libs \
+    && ldd /usr/bin/radeontop \
+       | awk '/=>/ && $3 !~ /^(\/lib\/x86_64|\/lib64)/ { print $3 }' \
+       | xargs -r -I{} cp -L {} /staging/radeontop-libs/ \
+    && echo "Bundled radeontop libs:" && ls /staging/radeontop-libs/
 
-# Create working directory
+
+# ─── Stage 3: Wolfi runtime ──────────────────────────────────────────────────
+FROM cgr.dev/chainguard/wolfi-base AS runtime
+
+# Runtime APK deps:
+#   libgomp   — OpenMP, required by llama.cpp
+#   python3   — rocm-smi is a Python script
+#   bash      — rocm-smi shebang + convenience
+RUN apk add --no-cache \
+      libgomp \
+      python3 \
+      bash
+
+# ── ROCm runtime libraries ────────────────────────────────────────────────────
+COPY --from=builder /staging/rocm-lib/ /opt/rocm/lib/
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH:-}
+
+# ── llama.cpp binaries ────────────────────────────────────────────────────────
+COPY --from=builder /staging/bin/ /usr/local/bin/
+
+# ── rocm-smi ──────────────────────────────────────────────────────────────────
+COPY --from=builder /staging/rocm-smi/bin/   /opt/rocm/bin/
+COPY --from=builder /staging/rocm-smi/module/ /opt/rocm/libexec/rocm_smi/
+# Make rocm-smi importable by the bundled script
+ENV PYTHONPATH=/opt/rocm/libexec:${PYTHONPATH:-}
+RUN ln -sf /opt/rocm/bin/rocm-smi /usr/local/bin/rocm-smi 2>/dev/null || true
+
+# ── amdgpu_top + radeontop ────────────────────────────────────────────────────
+COPY --from=monitoring /staging/bin/           /usr/local/bin/
+COPY --from=monitoring /staging/radeontop-libs/ /usr/local/lib/radeontop-libs/
+
+# Wrapper: prefer amdgpu_top, fall through to radeontop
+RUN printf '#!/usr/bin/env bash\n\
+if command -v amdgpu_top &>/dev/null; then\n\
+  exec amdgpu_top "$@"\n\
+else\n\
+  LD_LIBRARY_PATH=/usr/local/lib/radeontop-libs:${LD_LIBRARY_PATH} \\\n\
+    exec radeontop "$@"\n\
+fi\n' > /usr/local/bin/gpu-monitor \
+    && chmod +x /usr/local/bin/gpu-monitor
+
+# ── Sanity check ──────────────────────────────────────────────────────────────
+RUN echo "=== llama.cpp binaries ===" \
+    && ls -1 /usr/local/bin/llama-* \
+    && echo "=== monitoring tools ===" \
+    && ls -1 /usr/local/bin/rocm-smi /usr/local/bin/gpu-monitor \
+                /usr/local/bin/amdgpu_top /usr/local/bin/radeontop 2>/dev/null \
+    || true
+
 WORKDIR /models
 
-# Default command
+EXPOSE 8080
+
 ENTRYPOINT ["llama-server"]
 CMD []

@@ -5,27 +5,57 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch:   # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      gfx_arch:
+        description: "GPU architecture target (e.g. gfx1152, gfx1100, gfx906)"
+        default: "gfx1152"
+        required: true
+      release_id:
+        description: "ROCm nightly build ID"
+        default: "20260408-24115666439"
+        required: true
+      enable_rocwmma_fattn:
+        description: "Enable rocWMMA flash attention"
+        type: boolean
+        default: true
 
 env:
   IMAGE_NAME: llama-cpp-rocm
   REGISTRY: ghcr.io
 
+# Cancel any in-progress run for the same branch/PR to avoid wasted runner time.
+# Matrix suffix keeps server and full builds from cancelling each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.suffix }}
+  cancel-in-progress: true
+
 jobs:
   build-and-push:
     runs-on: ubuntu-24.04
+    timeout-minutes: 240   # ROCm/HIP compilation is slow; 4 h is a safe ceiling
+
     permissions:
       contents: read
       packages: write
+
+    strategy:
+      fail-fast: false      # let the other variant finish if one fails
+      matrix:
+        include:
+          - suffix: server
+            build_all: "OFF"
+          - suffix: full
+            build_all: "ON"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: true      # Fetch llama.cpp submodule
+          submodules: true
 
-      - name: Set up QEMU (for multi‑arch builds)
-        uses: docker/setup-qemu-action@v3
+      # QEMU intentionally omitted — ROCm only targets x86_64, emulation adds
+      # minutes of setup and breaks HIP device-code compilation.
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -38,28 +68,43 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
+      # Resolve build-args: workflow_dispatch inputs win; fall back to defaults.
+      # This lets manual runs target a different GPU without touching the file.
+      - name: Resolve build arguments
+        id: args
+        run: |
+          echo "gfx_arch=${{ inputs.gfx_arch || 'gfx1152' }}"                      >> "$GITHUB_OUTPUT"
+          echo "release_id=${{ inputs.release_id || '20260408-24115666439' }}"      >> "$GITHUB_OUTPUT"
+          echo "rocwmma=${{ inputs.enable_rocwmma_fattn == false && 'OFF' || 'ON' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          # Every tag gets the matrix suffix so :latest-server and :latest-full
+          # are independently addressable. The bare SHA tag lets you pin exactly.
           tags: |
-            type=ref,event=branch
-            type=sha
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=branch,suffix=-${{ matrix.suffix }}
+            type=sha,suffix=-${{ matrix.suffix }}
+            type=raw,value=latest-${{ matrix.suffix }},enable=${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build and push Docker image
+      - name: Build and push — ${{ matrix.suffix }}
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64   # ROCm is only available on x86_64
+          platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            RELEASE_ID=20260408-24115666439
-            GFX_ARCH=gfx1152
-            ENABLE_ROCWMMA_FATTN=ON
-            BUILD_WEBUI=ON
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            RELEASE_ID=${{ steps.args.outputs.release_id }}
+            GFX_ARCH=${{ steps.args.outputs.gfx_arch }}
+            ENABLE_ROCWMMA_FATTN=${{ steps.args.outputs.rocwmma }}
+            BUILD_ALL=${{ matrix.build_all }}
+          # Registry cache survives across branches and has no size cap,
+          # which matters here — the ROCm SDK layer alone is several GB.
+          # GHA cache (type=gha) has a 10 GB hard limit and would be evicted
+          # on almost every run.
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:buildcache-${{ matrix.suffix }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}/{2}:buildcache-{3},mode=max', env.REGISTRY, github.repository_owner, env.IMAGE_NAME, matrix.suffix) || '' }}
