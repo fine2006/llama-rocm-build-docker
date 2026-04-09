@@ -63,12 +63,8 @@ WORKDIR /build
 COPY . .
 
 # Build llama.cpp with optimized CMake configuration
-RUN HIPCXX="$(hipconfig -l)/clang" \
-    HIP_PATH="$(hipconfig -R)" \
-    cmake -S llama.cpp -B llama.cpp/build \
-        -DGGML_HIP=ON \
-        -DGGML_HIP_ROCWMMA_FATTN="${ENABLE_ROCWMMA_FATTN}" \
-        -DGPU_TARGETS="${GFX_ARCH}" \
+RUN cmake -S llama.cpp -B llama.cpp/build \
+        -DCMAKE_CXX_COMPILER="/opt/rocm/llvm/bin/clang" \
         -DGGML_CUDA=OFF \
         -DGGML_VULKAN=OFF \
         -DGGML_METAL=OFF \
@@ -85,9 +81,12 @@ RUN HIPCXX="$(hipconfig -l)/clang" \
         -DLLAMA_BUILD_TESTS=OFF \
         -DLLAMA_BUILD_TOOLS=OFF \
         -DLLAMA_BUILD_EXAMPLES=OFF \
+        -DGGML_HIP=ON \
+        -DGGML_HIP_ROCWMMA_FATTN="${ENABLE_ROCWMMA_FATTN}" \
+        -DGPU_TARGETS="${GFX_ARCH}" \
         -DLLAMA_BUILD_SERVER="ON" \
         -DLLAMA_BUILD_WEBUI="${BUILD_WEBUI}" \
-    && cmake --build llama.cpp/build -j$(nproc)
+    && cmake --build llama.cpp/build -j$(nproc) --verbose
 
 # Copy built binaries
 RUN cp llama.cpp/build/bin/llama-server /usr/local/bin/ && \
