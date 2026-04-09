@@ -54,6 +54,7 @@ RUN echo "deb [trusted=yes] https://rocm.nightlies.amd.com/deb/${RELEASE_ID} sta
     > /etc/apt/sources.list.d/rocm-nightly.list \
     && apt-get update && apt-get install -y --no-install-recommends \
          amdrocm-core-sdk-${GFX_ARCH} \
+         rocm-device-libs \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH \
@@ -76,6 +77,9 @@ RUN echo "=== hipconfig output ===" \
     && find /opt/rocm/lib/cmake /opt/rocm/share \
          \( -name 'hip-config.cmake' -o -name 'HIPConfig.cmake' \) 2>/dev/null \
        | head -5 \
+    && echo "=== ROCm device libs (OCML bitcode) ===" \
+    && ls /opt/rocm/lib/bitcode/*.bc 2>/dev/null | head -5 \
+       || echo "WARN: no bitcode files found — rocm-device-libs may be missing" \
     && echo "=== /opt/rocm/bin ===" \
     && ls /opt/rocm/bin/ | head -30
 
@@ -131,6 +135,7 @@ RUN HIPCXX="$(hipconfig --hipclangpath 2>/dev/null)/clang" \
       -DGGML_HIP=ON \
       -DGGML_HIP_ROCWMMA_FATTN="${ENABLE_ROCWMMA_FATTN}" \
       -DGPU_TARGETS="${GFX_ARCH}" \
+      -DCMAKE_HIP_FLAGS="--rocm-path=/opt/rocm" \
       --log-level=STATUS \
     && cmake --build llama.cpp/build -j$(nproc) --verbose
 
