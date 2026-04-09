@@ -1,6 +1,5 @@
 # Build artifacts
 llama.cpp/build*
-llama.cpp/.git
 llama.cpp/.github
 *.o
 *.a
@@ -11,6 +10,10 @@ __pycache__/
 .DS_Store
 *.tar
 *.deb
+
+# Git metadata (history has no place in a build context)
+.git
+# Note: llama.cpp/.git is a *file* in submodule repos, not a dir — no need to exclude it
 
 # Models and large files
 models/
@@ -24,3 +27,8 @@ models/
 *.swp
 *.swo
 *~
+
+# CI/CD and repo metadata (not needed for the build)
+.github/
+*.md
+LICENSE
