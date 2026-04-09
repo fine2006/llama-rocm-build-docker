@@ -60,14 +60,61 @@ ENV PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH \
     HIP_PATH=/opt/rocm \
     ROCM_PATH=/opt/rocm
 
+# ── Validate ROCm install before trying to use it ────────────────────────────
+# Runs as a separate layer so failures here produce a clear, targeted error
+# rather than a cryptic "cmake exit code 1".
+RUN echo "=== hipconfig output ===" \
+    # hipconfig is the canonical way to query ROCm paths. If this fails, the SDK
+    # package likely only installed runtime libs, not the full build toolchain.
+    && hipconfig --full \
+    && echo "=== LLVM/clang compiler ===" \
+    && ls -la /opt/rocm/llvm/bin/clang \
+    && /opt/rocm/llvm/bin/clang --version \
+    && echo "=== HIP CMake integration ===" \
+    # CMake's FindHIP needs these .cmake files; their absence means GGML_HIP=ON fails.
+    && find /opt/rocm/lib/cmake /opt/rocm/share \
+         \( -name 'hip-config.cmake' -o -name 'HIPConfig.cmake' \) 2>/dev/null \
+       | head -5 \
+    && echo "=== /opt/rocm/bin ===" \
+    && ls /opt/rocm/bin/ | head -30
+
 WORKDIR /build
 COPY . .
 
+# ── Confirm the llama.cpp submodule was actually checked out ─────────────────
+# An empty submodule is the most common silent failure — cmake exits 1 with
+# "CMakeLists.txt not found", which is easy to miss in truncated CI logs.
+RUN test -f llama.cpp/CMakeLists.txt \
+    || { printf '\nERROR: llama.cpp/CMakeLists.txt not found.\n'; \
+         printf 'The llama.cpp submodule is missing or empty.\n'; \
+         printf 'Ensure submodules: true is set in the checkout step and that\n'; \
+         printf 'the submodule is initialised: git submodule update --init --recursive\n\n'; \
+         exit 1; }
+
+# ── Resolve the HIP clang path robustly ──────────────────────────────────────
+# hipconfig -l returns the HIP *library* dir (e.g. /opt/rocm/lib), NOT the
+# compiler. The correct flag varies by ROCm version:
+#   ROCm >= 5.x  → hipconfig --hipclangpath  (returns /opt/rocm/llvm/bin)
+#   Fallback     → hardcoded /opt/rocm/llvm/bin/clang
+# We probe both and abort early with a useful message if neither works.
+RUN HIPCXX="$(hipconfig --hipclangpath 2>/dev/null)/clang" \
+    && if [ ! -x "${HIPCXX}" ]; then \
+         HIPCXX=/opt/rocm/llvm/bin/clang; \
+       fi \
+    && if [ ! -x "${HIPCXX}" ]; then \
+         echo "ERROR: cannot locate HIP clang — tried hipconfig --hipclangpath and /opt/rocm/llvm/bin/clang"; \
+         exit 1; \
+       fi \
+    && echo "Resolved HIPCXX=${HIPCXX}"
+
 # Configure and build — CPU variants explicitly disabled; HIP only
-RUN HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" \
+RUN HIPCXX="$(hipconfig --hipclangpath 2>/dev/null)/clang" \
+    && { [ -x "${HIPCXX}" ] || HIPCXX=/opt/rocm/llvm/bin/clang; } \
+    && HIP_PATH="$(hipconfig -R)" \
     cmake -S llama.cpp -B llama.cpp/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang \
+      -DCMAKE_CXX_COMPILER="${HIPCXX}" \
+      -DHIP_CXX_COMPILER="${HIPCXX}" \
       -DGGML_CPU_ALL_VARIANTS=OFF \
       -DGGML_NATIVE=OFF \
       -DGGML_CUDA=OFF \
@@ -76,7 +123,8 @@ RUN HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" \
       -DGGML_HIP=ON \
       -DGGML_HIP_ROCWMMA_FATTN="${ENABLE_ROCWMMA_FATTN}" \
       -DGPU_TARGETS="${GFX_ARCH}" \
-    && cmake --build llama.cpp/build -j$(nproc)
+      --log-level=STATUS \
+    && cmake --build llama.cpp/build -j$(nproc) --verbose
 
 # Stage binaries: llama-server always; rest behind BUILD_ALL
 RUN mkdir -p /staging/bin \
