@@ -7,13 +7,17 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
     inputs:
+      rocm_version:
+        description: "ROCm version (e.g., 7.12.0 for stable, 7.13.0a20260408 for nightlies)"
+        default: "7.12.0"
+        required: true
+      rocm_release_type:
+        description: "Release type: stable, nightlies, prereleases, devreleases"
+        default: "stable"
+        required: true
       gfx_arch:
         description: "GPU architecture target (e.g. gfx1152, gfx1100, gfx906)"
         default: "gfx1152"
-        required: true
-      release_id:
-        description: "ROCm nightly build ID"
-        default: "20260408-24115666439"
         required: true
       enable_rocwmma_fattn:
         description: "Enable rocWMMA flash attention"
@@ -73,9 +77,10 @@ jobs:
       - name: Resolve build arguments
         id: args
         run: |
-          echo "gfx_arch=${{ inputs.gfx_arch || 'gfx1152' }}"                      >> "$GITHUB_OUTPUT"
-          echo "release_id=${{ inputs.release_id || '20260408-24115666439' }}"      >> "$GITHUB_OUTPUT"
-          echo "rocwmma=${{ inputs.enable_rocwmma_fattn == false && 'OFF' || 'ON' }}" >> "$GITHUB_OUTPUT"
+          echo "rocm_version=${{ inputs.rocm_version || '7.12.0' }}"                      >> "$GITHUB_OUTPUT"
+          echo "rocm_release_type=${{ inputs.rocm_release_type || 'stable' }}"             >> "$GITHUB_OUTPUT"
+          echo "gfx_arch=${{ inputs.gfx_arch || 'gfx1152' }}"                             >> "$GITHUB_OUTPUT"
+          echo "rocwmma=${{ inputs.enable_rocwmma_fattn == false && 'OFF' || 'ON' }}"      >> "$GITHUB_OUTPUT"
 
       - name: Extract image metadata
         id: meta
@@ -98,7 +103,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            RELEASE_ID=${{ steps.args.outputs.release_id }}
+            ROCM_VERSION=${{ steps.args.outputs.rocm_version }}
+            ROCM_RELEASE_TYPE=${{ steps.args.outputs.rocm_release_type }}
             GFX_ARCH=${{ steps.args.outputs.gfx_arch }}
             ENABLE_ROCWMMA_FATTN=${{ steps.args.outputs.rocwmma }}
             BUILD_ALL=${{ matrix.build_all }}

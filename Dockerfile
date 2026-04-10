@@ -2,25 +2,24 @@
 # llama.cpp — ROCm-only build, Wolfi runtime, self-contained
 #
 # Build args:
-#   ROCM_VERSION      ROCm version from nightly builds (e.g., 7.11.0a20260408)
+#   ROCM_VERSION      ROCm version (e.g., 7.12.0 for stable, 7.13.0a20260408 for nightlies)
 #   ROCM_RELEASE_TYPE Release type: nightlies, prereleases, devreleases, stable
-#                      (default: nightlies)
+#                      (default: stable)
 #   GFX_ARCH          GPU target, e.g. gfx1152, gfx1100, gfx906
 #   ENABLE_ROCWMMA_FATTN  rocWMMA flash attention (ON | OFF)
 #   BUILD_ALL         OFF = llama-server only
 #                     ON  = + llama-{quantize,bench,perplexity}
 #
 # Examples:
-#   # Minimal — server only, nightly ROCm
+#   # Minimal — server only, stable ROCm
 #   podman build \
-#     --build-arg ROCM_VERSION=7.11.0a20260408 \
+#     --build-arg ROCM_VERSION=7.12.0 \
 #     --build-arg GFX_ARCH=gfx1152 \
 #     -t llama-rocm:server .
 #
 #   # Full toolkit, stable ROCm
 #   podman build \
-#     --build-arg ROCM_VERSION=7.10.0 \
-#     --build-arg ROCM_RELEASE_TYPE=stable \
+#     --build-arg ROCM_VERSION=7.12.0 \
 #     --build-arg GFX_ARCH=gfx1152 \
 #     --build-arg BUILD_ALL=ON \
 #     -t llama-rocm:full .
@@ -30,8 +29,8 @@
 # ─── Stage 1: llama.cpp builder (Fedora + ROCm from tarball) ────────────────
 FROM fedora:latest AS builder
 
-ARG ROCM_VERSION=7.13.0a20260408
-ARG ROCM_RELEASE_TYPE=nightlies
+ARG ROCM_VERSION=7.12.0
+ARG ROCM_RELEASE_TYPE=stable
 ARG GFX_ARCH=gfx1152
 ARG ENABLE_ROCWMMA_FATTN=ON
 ARG BUILD_ALL=OFF
