@@ -397,21 +397,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # v0.11.2+ adds "fix gfx and media activity for Strix Point, Krackan Point and Strix Halo"
 # — directly relevant to gfx1152 (Kracken Point).
 #
-# Asset filename format: amdgpu_top-VERSION-ARCH-unknown-linux-gnu.tar.gz
-# Note: "unknown" is part of the Rust target triple — omitting it gives a 404.
-# The tarball extracts to a directory; the binary is inside it.
-RUN ARCH=$(uname -m) \
-    && ASSET="amdgpu_top-${AMDGPU_TOP_VERSION}-${ARCH}-unknown-linux-gnu.tar.gz" \
-    && curl -fsSL \
-        "https://github.com/Umio-Yasuno/amdgpu_top/releases/download/v${AMDGPU_TOP_VERSION}/${ASSET}" \
-        -o /tmp/amdgpu_top.tar.gz \
-    && tar -xzf /tmp/amdgpu_top.tar.gz -C /tmp \
-    # Binary lives inside the extracted directory, not at the tarball root
-    && EXTRACTED_DIR=$(tar -tzf /tmp/amdgpu_top.tar.gz | head -1 | cut -d/ -f1) \
-    && install -m 755 "/tmp/${EXTRACTED_DIR}/amdgpu_top" /usr/local/bin/amdgpu_top \
-    && rm -rf /tmp/amdgpu_top* "/tmp/${EXTRACTED_DIR}"
-    # Note: --version not verified here — amdgpu_top probes /dev/dri which
-    # doesn't exist inside the Docker builder. Verify at runtime with: amdgpu_top --version
+# Install via deb package: amdgpu-top_VERSION-1_amd64.deb
+RUN curl -fsSL \
+      "https://github.com/Umio-Yasuno/amdgpu_top/releases/download/v${AMDGPU_TOP_VERSION}/amdgpu-top_${AMDGPU_TOP_VERSION}-1_amd64.deb" \
+      -o /tmp/amdgpu-top.deb \
+    && apt-get install -y /tmp/amdgpu-top.deb \
+    && rm -f /tmp/amdgpu-top.deb
 
 # ---------- Copy llama.cpp binaries from build stage ----------
 COPY --from=llama-build /llama-install/ /usr/local/
