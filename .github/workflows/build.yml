@@ -39,9 +39,9 @@ on:
         required: false
         default: "main"
       llamacpp_ref:
-        description: "llama.cpp git ref (branch or tag)"
+        description: "llama.cpp git ref (branch or tag). Leave blank for latest stable release"
         required: false
-        default: "master"
+        default: ""
       push_image:
         description: "Push image to GHCR? (true/false)"
         required: false
@@ -54,7 +54,7 @@ env:
   DEFAULT_ROCM_GFX_ARCH:  gfx1151
   DEFAULT_HIP_GPU_TARGETS: "gfx1151;gfx1152"
   DEFAULT_VLLM_REF:        main
-  DEFAULT_LLAMACPP_REF:    master
+  DEFAULT_LLAMACPP_REF:    b8755  # Fallback if auto-detection fails; updated by discover-llamacpp job
   PYTHON_VERSION:          "3.12"
   AMDGPU_TOP_VERSION:      "0.11.3"
 
@@ -90,11 +90,43 @@ jobs:
           echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
+  # Job 1b: Discover latest llama.cpp stable release
+  # ---------------------------------------------------------------------------
+  discover-llamacpp:
+    runs-on: ubuntu-latest
+    outputs:
+      llamacpp_ref: ${{ steps.detect.outputs.llamacpp_ref }}
+    steps:
+      - name: Detect latest llama.cpp stable release
+        id: detect
+        run: |
+          # If the user provided an explicit ref, use it.
+          if [[ -n "${{ github.event.inputs.llamacpp_ref }}" ]]; then
+            LLAMACPP_REF="${{ github.event.inputs.llamacpp_ref }}"
+            echo "Using user-provided llama.cpp ref: ${LLAMACPP_REF}"
+          else
+            echo "Auto-detecting latest llama.cpp stable release from GitHub API..."
+            # Query the latest release (prerelease=false for stable only)
+            LLAMACPP_REF=$(curl -fsSL \
+              "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=1" \
+              | grep -o '"tag_name": "[^"]*"' \
+              | head -1 \
+              | cut -d'"' -f4)
+            if [[ -z "${LLAMACPP_REF}" ]]; then
+              echo "::warn::Could not detect latest llama.cpp release, falling back to default: ${{ env.DEFAULT_LLAMACPP_REF }}"
+              LLAMACPP_REF="${{ env.DEFAULT_LLAMACPP_REF }}"
+            else
+              echo "Latest llama.cpp stable release: ${LLAMACPP_REF}"
+            fi
+          fi
+          echo "llamacpp_ref=${LLAMACPP_REF}" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
   # Job 2: Build the container image
   # ---------------------------------------------------------------------------
   build:
     runs-on: ubuntu-latest
-    needs: discover-nightly
+    needs: [discover-nightly, discover-llamacpp]
     permissions:
       contents:  read
       packages:  write
@@ -127,7 +159,7 @@ jobs:
           echo "rocm_gfx_arch=${{ github.event.inputs.rocm_gfx_arch || env.DEFAULT_ROCM_GFX_ARCH }}"         >> "$GITHUB_OUTPUT"
           echo "hip_gpu_targets=${{ github.event.inputs.hip_gpu_targets || env.DEFAULT_HIP_GPU_TARGETS }}"   >> "$GITHUB_OUTPUT"
           echo "vllm_ref=${{ github.event.inputs.vllm_ref || env.DEFAULT_VLLM_REF }}"                        >> "$GITHUB_OUTPUT"
-          echo "llamacpp_ref=${{ github.event.inputs.llamacpp_ref || env.DEFAULT_LLAMACPP_REF }}"            >> "$GITHUB_OUTPUT"
+          echo "llamacpp_ref=${{ needs.discover-llamacpp.outputs.llamacpp_ref }}"                            >> "$GITHUB_OUTPUT"
 
       - name: Extract Docker metadata
         id: meta
@@ -149,6 +181,7 @@ jobs:
             rdna35.therock-release=${{ needs.discover-nightly.outputs.release_id }}
             rdna35.rocm-gfx-arch=${{ steps.args.outputs.rocm_gfx_arch }}
             rdna35.hip-gpu-targets=${{ steps.args.outputs.hip_gpu_targets }}
+            rdna35.llamacpp-ref=${{ steps.args.outputs.llamacpp_ref }}
 
       # Cache individual build stages using GitHub Actions cache
       # Each stage gets its own cache key so a change to one stage doesn't

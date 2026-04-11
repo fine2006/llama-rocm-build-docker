@@ -188,8 +188,9 @@ RUN TARGETS_COMMA=$(echo "${HIP_GPU_TARGETS}" | tr ';' ',') \
           # ── Compiler settings ─────────────────────────────────────────────
           # ROCm 7+ LLVM loop-unroll regression workaround (kyuz0/amd-strix-halo-toolboxes#45)
           # Remove once llvm-project#147700 is fixed upstream.
+          # -isystem: Use HIP device math headers before system headers (fixes fmaxf/ldexpf/fabsf/powf conflicts)
           # -fno-math-errno: Allow device-side math functions to compile without errno checks
-          -DCMAKE_HIP_FLAGS="-mllvm --amdgpu-unroll-threshold-local=600 -fno-math-errno" \
+          -DCMAKE_HIP_FLAGS="-isystem ${ROCM_PATH}/include -mllvm --amdgpu-unroll-threshold-local=600 -fno-math-errno" \
           -DCMAKE_HIP_COMPILER=${ROCM_PATH}/llvm/bin/clang++ \
           -DCMAKE_C_COMPILER=${ROCM_PATH}/llvm/bin/clang \
           -DCMAKE_CXX_COMPILER=${ROCM_PATH}/llvm/bin/clang++ \
