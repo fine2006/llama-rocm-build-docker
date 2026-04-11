@@ -354,7 +354,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # -- Monitoring --
     htop \
     nvtop \          # GPU monitoring; ROCm-enabled via system package
-    radeontop \      # Classic AMDGPU top
     iotop \
     iftop \
     lm-sensors \
