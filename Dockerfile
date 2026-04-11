@@ -353,7 +353,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libelf1 \
     # -- Monitoring --
     htop \
-    nvtop \          # GPU monitoring; ROCm-enabled via system package
+    nvtop \
+    radeontop \
+    iotop \
+    iftop \
     lm-sensors \
     sysstat \
     # -- Distrobox/Toolbx compatibility --
