@@ -382,6 +382,126 @@ Edit `.github/workflows/build.yml` to:
 
 ---
 
+## Using uv for Project Management
+
+The distrobox includes **uv** (fast Python package manager) pre-installed, and comes with **system-wide pre-built wheels** for PyTorch, vLLM, Unsloth, bitsandbytes, and other ML libraries. This allows for efficient project management without rebuilding heavy packages.
+
+### Quick Start with uv
+
+```bash
+# Inside distrobox
+uv init my-ml-project
+cd my-ml-project
+
+# Edit pyproject.toml to add custom dependencies
+uv sync  # Installs dependencies, inherits system packages
+```
+
+### How It Works
+
+By default, `uv venv` creates virtual environments with `--system-site-packages`, which means:
+
+1. **System packages are inherited:** PyTorch, Unsloth, vLLM, transformers, etc. are available globally
+2. **Custom deps go into the venv:** Your project's `uv sync` only installs packages not already available system-wide
+3. **No wheel rebuilding:** Heavy packages like PyTorch are already compiled; your projects reuse them
+4. **Isolated dependencies:** Custom packages are isolated per project, preventing conflicts
+
+### Example pyproject.toml
+
+```toml
+[project]
+name = "my-fine-tune"
+version = "0.1.0"
+description = "Fine-tuning with Unsloth"
+dependencies = [
+    # Pre-installed system-wide (no reinstall):
+    "torch",
+    "unsloth",
+    "transformers",
+    
+    # Custom dependencies (installed into venv):
+    "wandb",
+    "peft",
+    "datasets",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+```
+
+Then inside the project:
+```bash
+uv sync        # Installs only wandb + peft + datasets
+python -c "import torch; import unsloth"  # Works (system package)
+```
+
+### Fallback Methods if System Packages Aren't Inherited
+
+If uv doesn't automatically inherit system packages, try these methods:
+
+**1. Explicit `--system-site-packages` flag:**
+```bash
+uv venv --system-site-packages .venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
+```
+
+**2. Manual venv creation with pip:**
+```bash
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+**3. Check what's available system-wide:**
+```bash
+python3 -c "import sys; print('\n'.join(sys.path))"  # Shows site-packages paths
+python3 -c "import torch; print(torch.__version__)"  # Verify torch is available
+```
+
+**4. List installed system packages:**
+```bash
+pip list  # Shows both system and virtual env packages
+```
+
+**5. Pin versions to match system installs:**
+```toml
+[project]
+dependencies = [
+    "torch>=2.0.0",      # System torch is already installed
+    "unsloth>=2024.12",  # System unsloth is already installed
+    "custom-lib==1.2.3", # New package, installed into venv
+]
+```
+
+### Distrobox + uv Workflow
+
+The distrobox acts as a **pre-configured ML environment**:
+
+- **Global tools:** PyTorch, Jupyter, vLLM, Unsloth are always available
+- **Project isolation:** Each `uv` project has isolated dependencies
+- **No bloat:** System packages aren't duplicated in every venv
+
+Example session:
+```bash
+# Start distrobox
+distrobox enter rdna35-dev
+
+# Quick experimentation (uses system PyTorch)
+python3 -c "import torch; print(torch.cuda.is_available())"
+
+# Create a project
+uv init ml-training
+cd ml-training
+uv sync
+
+# Run training script (uses both system + project packages)
+python train.py
+```
+
+---
+
 ## Security Considerations
 
 ### Container Privileges

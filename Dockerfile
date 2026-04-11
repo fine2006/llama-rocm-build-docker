@@ -213,8 +213,14 @@ FROM rocm-sdk AS bnb-build
 ARG HIP_GPU_TARGETS
 ARG PYTHON_VERSION
 
-# Install pip into the build env
-RUN python${PYTHON_VERSION} -m pip install --upgrade pip setuptools wheel
+ENV PYTHON=python${PYTHON_VERSION}
+
+# Create venv to work around PEP 668 (externally-managed environments)
+RUN ${PYTHON} -m venv /bnb-venv
+
+# Install pip/setuptools into the venv
+RUN . /bnb-venv/bin/activate \
+    && pip install --upgrade pip setuptools wheel
 
 # Clone the ROCm-enabled fork
 RUN git clone --depth=1 \
@@ -224,16 +230,19 @@ RUN git clone --depth=1 \
 
 WORKDIR /build/bitsandbytes
 
-RUN pip install -r requirements-dev.txt
+# Install build requirements via activated venv
+RUN . /bnb-venv/bin/activate \
+    && pip install -r requirements-dev.txt
 
 # Build for our target architectures.
 # AMDGPU_TARGETS maps to the GPU_TARGETS cmake arg.
-RUN cmake -DCOMPUTE_BACKEND=hip \
-          -DAMDGPU_TARGETS="${HIP_GPU_TARGETS}" \
-          -DCMAKE_HIP_COMPILER=${ROCM_PATH}/llvm/bin/clang++ \
-          -DCMAKE_C_COMPILER=${ROCM_PATH}/llvm/bin/clang \
-          -DCMAKE_CXX_COMPILER=${ROCM_PATH}/llvm/bin/clang++ \
-          -S . \
+RUN . /bnb-venv/bin/activate \
+    && cmake -DCOMPUTE_BACKEND=hip \
+             -DAMDGPU_TARGETS="${HIP_GPU_TARGETS}" \
+             -DCMAKE_HIP_COMPILER=${ROCM_PATH}/llvm/bin/clang++ \
+             -DCMAKE_C_COMPILER=${ROCM_PATH}/llvm/bin/clang \
+             -DCMAKE_CXX_COMPILER=${ROCM_PATH}/llvm/bin/clang++ \
+             -S . \
     && make -j$(nproc) \
     && pip wheel . --no-deps -w /bnb-wheels/
 
