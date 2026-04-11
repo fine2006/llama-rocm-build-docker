@@ -1,70 +1,118 @@
-name: Build Container Image
+# =============================================================================
+# .github/workflows/build.yml
+# Builds and pushes the rdna35-toolbox container image to GHCR.
+#
+# Triggers:
+#   - Push to main / tags
+#   - Weekly schedule (Sunday 02:00 UTC) to pick up new TheRock nightlies
+#   - Manual dispatch with optional build-arg overrides
+#
+# Image: ghcr.io/YOUR_ORG/rdna35-toolbox:latest (and :YYYYMMDD)
+# =============================================================================
+name: Build rdna35-toolbox
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches: [main]
+    tags:      ["v*"]
+  schedule:
+    # Every Sunday at 02:00 UTC — picks up fresh TheRock nightly packages
+    - cron: "0 2 * * 0"
   workflow_dispatch:
     inputs:
-      rocm_version:
-        description: "ROCm version (e.g., 7.12.0 for stable, 7.13.0a20260408 for nightlies)"
-        default: "7.12.0"
-        required: true
-      rocm_release_type:
-        description: "Release type: stable, nightlies, prereleases, devreleases"
-        default: "stable"
-        required: true
-      gfx_arch:
-        description: "GPU architecture target (e.g. gfx1152, gfx1100, gfx906)"
-        default: "gfx1152"
-        required: true
-      enable_rocwmma_fattn:
-        description: "Enable rocWMMA flash attention"
-        type: boolean
-        default: true
+      therock_release_id:
+        description: |
+          TheRock nightly release ID (YYYYMMDD-COMMITSHA).
+          Leave blank to auto-detect the latest from rocm.nightlies.amd.com/deb/
+        required: false
+        default: ""
+      rocm_gfx_arch:
+        description: "ROCm package arch (gfx1151 until gfx1152 packages land)"
+        required: false
+        default: "gfx1151"
+      hip_gpu_targets:
+        description: "GPU targets for source builds (semicolon-separated)"
+        required: false
+        default: "gfx1151;gfx1152"
+      vllm_ref:
+        description: "vLLM git ref (branch or tag)"
+        required: false
+        default: "main"
+      llamacpp_ref:
+        description: "llama.cpp git ref (branch or tag)"
+        required: false
+        default: "master"
+      push_image:
+        description: "Push image to GHCR? (true/false)"
+        required: false
+        default: "true"
 
 env:
-  IMAGE_NAME: llama-cpp-rocm
   REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/rdna35-toolbox
+  # Default build args — overridable via workflow_dispatch inputs
+  DEFAULT_ROCM_GFX_ARCH:  gfx1151
+  DEFAULT_HIP_GPU_TARGETS: "gfx1151;gfx1152"
+  DEFAULT_VLLM_REF:        main
+  DEFAULT_LLAMACPP_REF:    master
+  PYTHON_VERSION:          "3.12"
+  AMDGPU_TOP_VERSION:      "0.11.3"
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 240   # ROCm/HIP compilation is slow; 4 h is a safe ceiling
+  # ---------------------------------------------------------------------------
+  # Job 1: Discover latest TheRock nightly release ID
+  # ---------------------------------------------------------------------------
+  discover-nightly:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.detect.outputs.release_id }}
+    steps:
+      - name: Detect latest TheRock nightly release
+        id: detect
+        run: |
+          # If the user provided an explicit release ID, use it.
+          if [[ -n "${{ github.event.inputs.therock_release_id }}" ]]; then
+            RELEASE_ID="${{ github.event.inputs.therock_release_id }}"
+            echo "Using user-provided release ID: ${RELEASE_ID}"
+          else
+            echo "Auto-detecting latest TheRock nightly from rocm.nightlies.amd.com/deb/ ..."
+            # Fetch the directory listing and extract the most recent YYYYMMDD-SHA entry
+            RELEASE_ID=$(curl -fsSL https://rocm.nightlies.amd.com/deb/ \
+              | grep -oP '\d{8}-[0-9a-f]+' \
+              | sort -u \
+              | tail -1)
+            if [[ -z "${RELEASE_ID}" ]]; then
+              echo "::error::Could not detect TheRock nightly release ID. Check https://rocm.nightlies.amd.com/deb/"
+              exit 1
+            fi
+            echo "Latest TheRock nightly: ${RELEASE_ID}"
+          fi
+          echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
 
-    # Cancel stale runs of the same variant. Matrix suffix is in scope here
-    # (job level), unlike the workflow-level concurrency block where it isn't.
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.suffix }}
-      cancel-in-progress: true
-
+  # ---------------------------------------------------------------------------
+  # Job 2: Build the container image
+  # ---------------------------------------------------------------------------
+  build:
+    runs-on: ubuntu-latest
+    needs: discover-nightly
     permissions:
-      contents: read
-      packages: write
-
-    strategy:
-      fail-fast: false      # let the other variant finish if one fails
-      matrix:
-        include:
-          - suffix: server
-            build_all: "OFF"
-          - suffix: full
-            build_all: "ON"
+      contents:  read
+      packages:  write
+      id-token:  write   # for OIDC attestation (optional)
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: true
-
-      # QEMU intentionally omitted — ROCm only targets x86_64, emulation adds
-      # minutes of setup and breaks HIP device-code compilation.
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          # Use containerd snapshotter for better layer caching
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
 
-      - name: Log in to GitHub Container Registry
+      - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
@@ -72,45 +120,149 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Resolve build-args: workflow_dispatch inputs win; fall back to defaults.
-      # This lets manual runs target a different GPU without touching the file.
+      # Compute build args from inputs (or defaults)
       - name: Resolve build arguments
         id: args
         run: |
-          echo "rocm_version=${{ inputs.rocm_version || '7.12.0' }}"                      >> "$GITHUB_OUTPUT"
-          echo "rocm_release_type=${{ inputs.rocm_release_type || 'stable' }}"             >> "$GITHUB_OUTPUT"
-          echo "gfx_arch=${{ inputs.gfx_arch || 'gfx1152' }}"                             >> "$GITHUB_OUTPUT"
-          echo "rocwmma=${{ inputs.enable_rocwmma_fattn == false && 'OFF' || 'ON' }}"      >> "$GITHUB_OUTPUT"
+          echo "rocm_gfx_arch=${{ github.event.inputs.rocm_gfx_arch || env.DEFAULT_ROCM_GFX_ARCH }}"         >> "$GITHUB_OUTPUT"
+          echo "hip_gpu_targets=${{ github.event.inputs.hip_gpu_targets || env.DEFAULT_HIP_GPU_TARGETS }}"   >> "$GITHUB_OUTPUT"
+          echo "vllm_ref=${{ github.event.inputs.vllm_ref || env.DEFAULT_VLLM_REF }}"                        >> "$GITHUB_OUTPUT"
+          echo "llamacpp_ref=${{ github.event.inputs.llamacpp_ref || env.DEFAULT_LLAMACPP_REF }}"            >> "$GITHUB_OUTPUT"
 
-      - name: Extract image metadata
+      - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-          # Every tag gets the matrix suffix so :latest-server and :latest-full
-          # are independently addressable. The bare SHA tag lets you pin exactly.
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch,suffix=-${{ matrix.suffix }}
-            type=sha,suffix=-${{ matrix.suffix }}
-            type=raw,value=latest-${{ matrix.suffix }},enable=${{ github.ref == 'refs/heads/main' }}
+            # :latest on default branch
+            type=raw,value=latest,enable={{is_default_branch}}
+            # :YYYYMMDD date tag (from TheRock nightly)
+            type=raw,value=${{ needs.discover-nightly.outputs.release_id }}
+            # :vX.Y.Z for semver tags
+            type=semver,pattern={{version}}
+            # :sha-XXXXXXX for every commit
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=rdna35-toolbox
+            org.opencontainers.image.description=Distrobox/Toolbx for AMD Radeon 860M (gfx1152/RDNA3.5)
+            rdna35.therock-release=${{ needs.discover-nightly.outputs.release_id }}
+            rdna35.rocm-gfx-arch=${{ steps.args.outputs.rocm_gfx_arch }}
+            rdna35.hip-gpu-targets=${{ steps.args.outputs.hip_gpu_targets }}
 
-      - name: Build and push — ${{ matrix.suffix }}
+      # Cache individual build stages using GitHub Actions cache
+      # Each stage gets its own cache key so a change to one stage doesn't
+      # bust the cache for unrelated stages.
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          file: ./Dockerfile
+          push: ${{ github.event_name != 'pull_request' && (github.event.inputs.push_image != 'false') }}
+          tags:   ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Build args
           build-args: |
-            ROCM_VERSION=${{ steps.args.outputs.rocm_version }}
-            ROCM_RELEASE_TYPE=${{ steps.args.outputs.rocm_release_type }}
-            GFX_ARCH=${{ steps.args.outputs.gfx_arch }}
-            ENABLE_ROCWMMA_FATTN=${{ steps.args.outputs.rocwmma }}
-            BUILD_ALL=${{ matrix.build_all }}
-          # Registry cache survives across branches and has no size cap,
-          # which matters here — the ROCm SDK layer alone is several GB.
-          # GHA cache (type=gha) has a 10 GB hard limit and would be evicted
-          # on almost every run.
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:buildcache-${{ matrix.suffix }}
-          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}/{2}:buildcache-{3},mode=max', env.REGISTRY, github.repository_owner, env.IMAGE_NAME, matrix.suffix) || '' }}
+            THEROCK_RELEASE_ID=${{ needs.discover-nightly.outputs.release_id }}
+            ROCM_GFX_ARCH=${{ steps.args.outputs.rocm_gfx_arch }}
+            HIP_GPU_TARGETS=${{ steps.args.outputs.hip_gpu_targets }}
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            VLLM_REF=${{ steps.args.outputs.vllm_ref }}
+            LLAMACPP_REF=${{ steps.args.outputs.llamacpp_ref }}
+            AMDGPU_TOP_VERSION=${{ env.AMDGPU_TOP_VERSION }}
+          # Layer caching via GHCR
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-rocm-sdk
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-llama-build
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-bnb-build
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-vllm-build
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-final
+          cache-to: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-rocm-sdk,mode=max,target=rocm-sdk
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-llama-build,mode=max,target=llama-build
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-bnb-build,mode=max,target=bnb-build
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-vllm-build,mode=max,target=vllm-build
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache-final,mode=max,target=final
+          # Provenance attestation
+          provenance: true
+          sbom: true
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Smoke test — quick sanity check after push
+  # ---------------------------------------------------------------------------
+  smoke-test:
+    runs-on: ubuntu-latest
+    needs: [build, discover-nightly]
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Verify Python imports
+        run: |
+          docker run --rm \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            python3 -c "
+          import torch, vllm, unsloth, bitsandbytes
+          print('torch:',         torch.__version__)
+          print('vllm:',          vllm.__version__)
+          print('unsloth:',       unsloth.__version__)
+          print('bitsandbytes:',  bitsandbytes.__version__)
+          print('All imports OK')
+          "
+
+      - name: Verify llama.cpp binaries
+        run: |
+          docker run --rm \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            sh -c "llama-server --version || llama-cli --version"
+
+      - name: Verify monitoring tools
+        run: |
+          docker run --rm \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            sh -c "htop --version && amdgpu_top --version && nvtop --version"
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Create a GitHub Release when a semver tag is pushed
+  # ---------------------------------------------------------------------------
+  release:
+    runs-on: ubuntu-latest
+    needs: [build, discover-nightly, smoke-test]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## rdna35-toolbox ${{ github.ref_name }}
+
+            **TheRock nightly**: `${{ needs.discover-nightly.outputs.release_id }}`
+            **Primary ROCm arch**: `gfx1151` (gfx1152 packages pending [TheRock#2310](https://github.com/ROCm/TheRock/issues/2310))
+            **Compiled GPU targets**: `gfx1151;gfx1152`
+
+            ### Pull & run with distrobox
+            ```bash
+            distrobox create rdna35 \
+              --image ghcr.io/${{ github.repository_owner }}/rdna35-toolbox:${{ github.ref_name }} \
+              -- --device /dev/kfd --device /dev/dri \
+                 --group-add video --group-add render
+            distrobox enter rdna35
+            ```
+
+            ### gfx1152 fallback
+            If GPU detection fails on Radeon 860M:
+            ```bash
+            export HSA_OVERRIDE_GFX_VERSION=11.5.1
+            ```
