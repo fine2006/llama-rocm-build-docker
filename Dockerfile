@@ -51,8 +51,9 @@ ARG PYTHON_VERSION=3.12
 # vLLM git ref — main branch for latest gfx1151/1152 work
 ARG VLLM_REF=main
 
-# llama.cpp git ref
-ARG LLAMACPP_REF=master
+# llama.cpp git ref — use stable releases for better ROCm compatibility
+# Check latest at: https://github.com/ggml-org/llama.cpp/releases
+ARG LLAMACPP_REF=b8755
 
 # amdgpu_top release tag
 ARG AMDGPU_TOP_VERSION=0.11.3
@@ -106,13 +107,14 @@ RUN echo "deb [trusted=yes] https://rocm.nightlies.amd.com/deb/${THEROCK_RELEASE
 # (rocWMMA flash attention gives a significant perf uplift on gfx115X)
 RUN apt-get install -y --no-install-recommends \
     amdrocm-core-sdk-${ROCM_GFX_ARCH} \
+    rocwmma-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # The TheRock DEB layout mirrors the classic /opt/rocm structure.
 ENV ROCM_PATH=/opt/rocm
 ENV PATH="${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
-ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib64:${LD_LIBRARY_PATH}"
-ENV CMAKE_PREFIX_PATH="${ROCM_PATH}:${CMAKE_PREFIX_PATH}"
+ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib64:${LD_LIBRARY_PATH:-}"
+ENV CMAKE_PREFIX_PATH="${ROCM_PATH}:${CMAKE_PREFIX_PATH:-}"
 
 # Verify hipcc is present
 RUN hipcc --version
@@ -185,14 +187,15 @@ RUN TARGETS_COMMA=$(echo "${HIP_GPU_TARGETS}" | tr ';' ',') \
          -DGGML_HIP_MMQ_MFMA=ON \
          # HIP graph capture to reduce per-token CPU overhead
          -DGGML_HIP_GRAPHS=ON \
-         \
-         # ── Compiler settings ─────────────────────────────────────────────
-         # ROCm 7+ LLVM loop-unroll regression workaround (kyuz0/amd-strix-halo-toolboxes#45)
-         # Remove once llvm-project#147700 is fixed upstream.
-         -DCMAKE_HIP_FLAGS="-mllvm --amdgpu-unroll-threshold-local=600" \
-         -DCMAKE_HIP_COMPILER=${ROCM_PATH}/llvm/bin/clang++ \
-         -DCMAKE_C_COMPILER=${ROCM_PATH}/llvm/bin/clang \
-         -DCMAKE_CXX_COMPILER=${ROCM_PATH}/llvm/bin/clang++ \
+          \
+          # ── Compiler settings ─────────────────────────────────────────────
+          # ROCm 7+ LLVM loop-unroll regression workaround (kyuz0/amd-strix-halo-toolboxes#45)
+          # Remove once llvm-project#147700 is fixed upstream.
+          # -fno-math-errno: Allow device-side math functions to compile without errno checks
+          -DCMAKE_HIP_FLAGS="-mllvm --amdgpu-unroll-threshold-local=600 -fno-math-errno" \
+          -DCMAKE_HIP_COMPILER=${ROCM_PATH}/llvm/bin/clang++ \
+          -DCMAKE_C_COMPILER=${ROCM_PATH}/llvm/bin/clang \
+          -DCMAKE_CXX_COMPILER=${ROCM_PATH}/llvm/bin/clang++ \
          \
          # ── Server build ──────────────────────────────────────────────────
          -DLLAMA_BUILD_SERVER=ON \

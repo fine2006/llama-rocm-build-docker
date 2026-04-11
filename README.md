@@ -49,14 +49,14 @@ This repository provides a containerized **ML development environment** for **AM
 | `HIP_GPU_TARGETS` | `gfx1151;gfx1152` | Semicolon-separated GPU architectures to compile for (llama.cpp, vLLM, bitsandbytes) |
 | `PYTHON_VERSION` | `3.12` | Python version to install (3.13 not supported by Unsloth) |
 | `VLLM_REF` | `main` | vLLM git branch/tag to build |
-| `LLAMACPP_REF` | `master` | llama.cpp git branch/tag to build |
+| `LLAMACPP_REF` | `b8755` | llama.cpp stable release tag. Use stable tags for better ROCm compatibility ([releases](https://github.com/ggml-org/llama.cpp/releases)) |
 | `AMDGPU_TOP_VERSION` | `0.11.3` | amdgpu_top release version for GPU monitoring |
 
 ### Build Environment
 
 The image is optimized for **Radeon 860M (gfx1152 / RDNA3.5)** as a UMA APU:
 
-- ✅ **llama.cpp** compiled with HIP backend, native gfx1151+gfx1152 support, rocWMMA FlashAttention
+- ✅ **llama.cpp** compiled with stable release tag (b8755) for better ROCm compatibility; native gfx1151+gfx1152 support, rocWMMA FlashAttention
 - ✅ **vLLM** with gfx1151 nightly wheels (gfx1152 fallback via `HSA_OVERRIDE_GFX_VERSION=11.5.1`)
 - ✅ **PyTorch, Unsloth, bitsandbytes** from TheRock gfx1151 nightlies
 - ✅ **ML tools**: Jupyter, transformers, datasets, accelerate, peft, trl, huggingface_hub
@@ -154,7 +154,7 @@ podman build \
   --build-arg HIP_GPU_TARGETS="gfx1151;gfx1152" \
   --build-arg PYTHON_VERSION=3.12 \
   --build-arg VLLM_REF=main \
-  --build-arg LLAMACPP_REF=master \
+  --build-arg LLAMACPP_REF=b8755 \
   -t rdna35-toolbox:latest .
 ```
 
