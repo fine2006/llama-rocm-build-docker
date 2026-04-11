@@ -106,7 +106,6 @@ RUN echo "deb [trusted=yes] https://rocm.nightlies.amd.com/deb/${THEROCK_RELEASE
 # (rocWMMA flash attention gives a significant perf uplift on gfx115X)
 RUN apt-get install -y --no-install-recommends \
     amdrocm-core-sdk-${ROCM_GFX_ARCH} \
-    rocwmma-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # The TheRock DEB layout mirrors the classic /opt/rocm structure.
