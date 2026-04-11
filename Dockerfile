@@ -354,8 +354,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # -- Monitoring --
     htop \
     nvtop \          # GPU monitoring; ROCm-enabled via system package
-    iotop \
-    iftop \
     lm-sensors \
     sysstat \
     # -- Distrobox/Toolbx compatibility --

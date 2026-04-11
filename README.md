@@ -21,18 +21,18 @@ This repository provides a containerized **ML development environment** for **AM
 │   └── workflows/
 │       └── build.yml          # GitHub Actions workflow
 ├── .dockerignore              # Files to exclude from build context
-├── .gitmodules                # Defines llama.cpp submodule
 ├── Dockerfile                 # Container build instructions (multi-stage)
-├── llama.cpp/                 # Git submodule (ggml-org/llama.cpp)
 └── README.md                  # This file
 ```
+
+**Note:** llama.cpp, vLLM, and bitsandbytes are cloned fresh during the Docker build (not from git submodules). The `LLAMACPP_REF`, `VLLM_REF`, and other build args control which branches/tags are fetched.
 
 ---
 
 ## Prerequisites
 
 - **Podman** or **Docker** with BuildKit support.
-- **Git** (to clone the repository and submodules).
+- **Git** (to clone this repository).
 - AMD GPU with ROCm‑compatible driver installed on the host.
 - (Optional) Access to a container registry if you wish to push images.
 
