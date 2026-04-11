@@ -77,7 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake ninja-build \
     git git-lfs curl wget ca-certificates \
     # Python + pip
-    python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
+    python${PYTHON_VERSION} python${PYTHON_VERSION}-full python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
     python3-pip \
     # Misc libs needed at build time
     libdrm-dev libelf-dev pkg-config patchelf \
